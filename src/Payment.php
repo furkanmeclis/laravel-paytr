@@ -18,7 +18,7 @@ use FurkanMeclis\Paytr\Request\Config;
 use FurkanMeclis\Paytr\Request\Option;
 use FurkanMeclis\Paytr\Request\Order;
 use FurkanMeclis\Paytr\Response\PaymentResponse;
-
+use Illuminate\Support\Facades\Log;
 class Payment
 {
     private Client $client;
@@ -26,8 +26,10 @@ class Payment
     private Option $option;
     private PaymentResponse $response;
 
-    public function __construct(?array $config = [], ?array $options = [])
+    public function __construct(?array $credentials = [], ?array $options = [])
     {
+        $config = array_merge($credentials ?? [], $options ?? []);
+
         if ($config) {
             $this->setConfig(new Config($config));
         }
@@ -36,7 +38,10 @@ class Payment
             $this->setOption(new Option($options));
         }
 
-        $this->client = new Client();
+        $this->client = new Client([
+            'base_uri' => $this->config->getApiUrl(),
+            'timeout'  => 30,
+        ]);
     }
 
     /**
@@ -270,6 +275,12 @@ class Payment
         } else {
             $url = $this->getConfig()->getApiUrl() . '/odeme/api/get-token';
         }
+
+        Log::info('PayTR İstek Gönderiliyor:', [
+            'url' => $url,
+            'data' => $data
+        ]);
+
         $request = $this->client->request('POST', $url, [
             'form_params' => $data,
             'timeout' => $this->getOption()->getTimeOutLimit(),
@@ -278,20 +289,41 @@ class Payment
         try {
             $response = $request->getBody()->getContents();
             $content = json_decode($response, true);
+
+            Log::info('PayTR Yanıt Alındı:', [
+                'raw_response' => $response,
+                'parsed_content' => $content
+            ]);
+
             if (is_null($content)) {
                 $paymentResponse = (new PaymentResponse())
                     ->setIsHtml(true)
                     ->setHtml($response)
                     ->setIsSuccess(true);
                 $this->setResponse($paymentResponse);
+
+                Log::info('PayTR HTML Yanıt:', [
+                    'is_success' => true,
+                    'response_type' => 'html'
+                ]);
             } else {
                 $paymentResponse = (new PaymentResponse())
                     ->setIsHtml(false)
                     ->setIsSuccess('success' == $content['status'])
                     ->setContent($content);
                 $this->setResponse($paymentResponse);
+
+                Log::info('PayTR JSON Yanıt:', [
+                    'is_success' => 'success' == $content['status'],
+                    'response_type' => 'json',
+                    'content' => $content
+                ]);
             }
         } catch (HttpExceptionInterface $e) {
+            Log::error('PayTR Hata:', [
+                'error' => $e->getMessage(),
+                'trace' => $e->getTraceAsString()
+            ]);
             throw new ClientException($e->getMessage());
         }
 
