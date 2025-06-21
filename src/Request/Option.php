@@ -224,11 +224,14 @@ class Option
     }
 
     /**
-     * @param ClientLang $clientLang
+     * @param ClientLang|string $clientLang
      * @return Option
      */
-    public function setClientLang(ClientLang $clientLang): Option
+    public function setClientLang(ClientLang|string $clientLang): Option
     {
+        if (is_string($clientLang)) {
+            $clientLang = ClientLang::from($clientLang);
+        }
         $this->clientLang = $clientLang;
         return $this;
     }
@@ -242,11 +245,14 @@ class Option
     }
 
     /**
-     * @param Currency $currency
+     * @param Currency|string $currency
      * @return Option
      */
-    public function setCurrency(Currency $currency): Option
+    public function setCurrency(Currency|string $currency): Option
     {
+        if(is_string($currency)) {
+            $currency = Currency::from($currency);
+        }
         $this->currency = $currency;
         return $this;
     }

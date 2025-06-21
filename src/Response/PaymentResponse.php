@@ -51,11 +51,23 @@ class PaymentResponse
     }
 
     /**
-     * @return string
+     * @return string|null
      */
-    public function getHtml(): string
+    public function getHtml(): ?string
     {
-        return $this->html;
+        if ($this->isSuccess() && !$this->isHtml() && $this->getToken()) {
+            $iframeHtml = '<iframe src="https://www.paytr.com/odeme/guvenli/' . $this->getToken() . '" id="paytriframe" frameborder="0" scrolling="no" style="width: 100%;"></iframe>';
+            $resizerScript = '<script src="https://www.paytr.com/js/iframeResizer.min.js"></script>';
+            $initScript = '<script>iFrameResize({},\'#paytriframe\');</script>';
+
+            return $resizerScript . $iframeHtml . $initScript;
+        }
+
+        if (isset($this->html)) {
+            return $this->html;
+        }
+
+        return '';
     }
 
     /**

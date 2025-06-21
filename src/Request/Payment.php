@@ -8,521 +8,295 @@
  * @link      https://github.com/furkanmeclis/laravel-paytr
  */
 
-namespace FurkanMeclis\Paytr\Request;
+namespace FurkanMeclis\Paytr;
 
-use FurkanMeclis\Paytr\Enums\CardType;
-use FurkanMeclis\Paytr\Enums\ClientLang;
-use FurkanMeclis\Paytr\Enums\Currency;
+use GuzzleHttp\Client;
+use Illuminate\Http\Request;
 use FurkanMeclis\Paytr\Enums\PaymentType;
-use FurkanMeclis\Paytr\PaytrClient;
+use FurkanMeclis\Paytr\Enums\TransactionType;
+use FurkanMeclis\Paytr\Request\Config;
+use FurkanMeclis\Paytr\Request\Option;
+use FurkanMeclis\Paytr\Request\Order;
 use FurkanMeclis\Paytr\Response\PaymentResponse;
 
-class Payment extends PaytrClient
+class Payment
 {
-    private string $userIp;
-    private string $merchantOid;
-    private string $email;
-    private PaymentType $paymentType = PaymentType::CARD;
-    private float $paymentAmount;
-    private int $installmentCount;
-    private ?CardType $cardType;
-    private Currency $currency = Currency::TL;
-    private ClientLang $clientLang = ClientLang::TR;
-    private bool $testMode = false;
-    private bool $non3d = false;
-    private bool $non3dTestFailed = false;
-    private string $cardOwner;
-    private string $cardNumber;
-    private string $cardExpireMonth;
-    private string $cardExpireYear;
-    private string $cardCvv;
-    private string $successUrl;
-    private string $failUrl;
-    private string $userName;
-    private string $userAddress;
-    private string $userPhone;
-    private Basket $basket;
-    private bool $debugOn = false;
-    private bool $syncMode = false;
+    private Client $client;
+    private Config $config;
+    private Option $option;
+    private PaymentResponse $response;
+
+    public function __construct(?array $config = [], ?array $options = [])
+    {
+        $mergedConfig = array_merge($config ?? [], $options ?? []);
+
+        if ($config) {
+            $this->setConfig(new Config($mergedConfig));
+        }
+
+        if ($options) {
+            $this->setOption(new Option($options));
+        }
+
+        $this->client = new Client();
+    }
+
+    /**
+     * @return Config
+     */
+    public function getConfig(): Config
+    {
+        return $this->config;
+    }
+
+    /**
+     * @param Config $config
+     * @return Payment
+     */
+    public function setConfig(Config $config): Payment
+    {
+        $this->config = $config;
+        return $this;
+    }
+
+    /**
+     * @return Option
+     */
+    public function getOption(): Option
+    {
+        return $this->option;
+    }
+
+    /**
+     * @param Option $option
+     * @return Payment
+     */
+    public function setOption(Option $option): Payment
+    {
+        $this->option = $option;
+        return $this;
+    }
+
+    /**
+     * @return Order
+     */
+    public function getOrder(): Order
+    {
+        return $this->order;
+    }
+
+    /**
+     * @param Order $order
+     * @return Payment
+     */
+    public function setOrder(Order $order): Payment
+    {
+        $this->order = $order;
+        return $this;
+    }
+
+    /**
+     * @return Client
+     */
+    public function getClient(): Client
+    {
+        return $this->client;
+    }
+
+    /**
+     * @param Client $client
+     * @return Payment
+     */
+    public function setClient(Client $client): Payment
+    {
+        $this->client = $client;
+        return $this;
+    }
+
+    /**
+     * @return PaymentResponse
+     */
+    public function getResponse(): PaymentResponse
+    {
+        return $this->response;
+    }
+
+    /**
+     * @param PaymentResponse $response
+     * @return Payment
+     */
+    public function setResponse(PaymentResponse $response): Payment
+    {
+        $this->response = $response;
+        return $this;
+    }
 
     /**
      * @return string
      */
-    public function getUserIp(): string
+    protected function generateHash(): string
     {
-        return $this->userIp;
-    }
+        if ($this->getOption()->getTransactionType() == TransactionType::DIRECT) {
+            return (string)$this->getConfig()->getMerchantId() .
+                (string)$this->getOrder()->getUserIp() .
+                (string)$this->getOrder()->getMerchantOrderId() .
+                (string)$this->getOrder()->getEmail() .
+                (string)$this->getOrder()->getPaymentAmount() .
+                (string)PaymentType::CARD->value .
+                (int)$this->getOption()->getInstallmentCount() .
+                (string)$this->getOption()->getCurrency()->value .
+                (int)$this->getOption()->isTestMode() .
+                (int)$this->getOption()->isNon3d();
+        }
 
-    /**
-     * @param string $userIp
-     */
-    public function setUserIp(string $userIp): void
-    {
-        $this->userIp = $userIp;
+        if ($this->getOption()->getTransactionType() == TransactionType::IFRAME) {
+            return (string)$this->getConfig()->getMerchantId() .
+                (string)$this->getOrder()->getUserIp() .
+                (string)$this->getOrder()->getMerchantOrderId() .
+                (string)$this->getOrder()->getEmail() .
+                (string)$this->getOrder()->getPaymentAmountFormatted() .
+                (string)$this->getOrder()->getBasket()->getFormattedBase64() .
+                (int)$this->getOption()->isNoInstallment() .
+                (int)$this->getOption()->getMaxInstallment() .
+                (string)$this->getOption()->getCurrency()->value .
+                (int)$this->getOption()->isTestMode();
+        }
+
+        if ($this->getOption()->getTransactionType() == TransactionType::IFRAME_TRANSFER) {
+            return (string)$this->getConfig()->getMerchantId() .
+                (string)$this->getOrder()->getUserIp() .
+                (string)$this->getOrder()->getMerchantOrderId() .
+                (string)$this->getOrder()->getEmail() .
+                (string)$this->getOrder()->getPaymentAmountFormatted() .
+                (string)PaymentType::EFT->value .
+                (int)$this->getOption()->isTestMode();
+        }
     }
 
     /**
      * @return string
      */
-    public function getMerchantOid(): string
+    public function generateHashToken(): string
     {
-        return $this->merchantOid;
-    }
-
-    /**
-     * @param string $merchantOid
-     */
-    public function setMerchantOid(string $merchantOid): void
-    {
-        $this->merchantOid = $merchantOid;
-    }
-
-    /**
-     * @return string
-     */
-    public function getEmail(): string
-    {
-        return $this->email;
-    }
-
-    /**
-     * @param string $email
-     */
-    public function setEmail(string $email): void
-    {
-        $this->email = $email;
-    }
-
-    /**
-     * @return PaymentType
-     */
-    public function getPaymentType(): PaymentType
-    {
-        return $this->paymentType;
-    }
-
-    /**
-     * @param PaymentType $paymentType
-     */
-    public function setPaymentType(PaymentType $paymentType): void
-    {
-        $this->paymentType = $paymentType;
-    }
-
-    /**
-     * @return float
-     */
-    public function getPaymentAmount(): float
-    {
-        return $this->paymentAmount;
-    }
-
-    public function getFormattedPaymentAmount(): string
-    {
-        return (string)($this->paymentAmount * 100);
-    }
-
-    /**
-     * @param float $paymentAmount
-     */
-    public function setPaymentAmount(float $paymentAmount): void
-    {
-        $this->paymentAmount = $paymentAmount;
-    }
-
-    /**
-     * @return int
-     */
-    public function getInstallmentCount(): int
-    {
-        return $this->installmentCount;
-    }
-
-    /**
-     * @param int $installmentCount
-     */
-    public function setInstallmentCount(int $installmentCount): void
-    {
-        $this->installmentCount = $installmentCount;
-    }
-
-    /**
-     * @return CardType|null
-     */
-    public function getCardType(): ?CardType
-    {
-        return $this->cardType;
-    }
-
-    /**
-     * @param CardType|null $cardType
-     */
-    public function setCardType(?CardType $cardType): void
-    {
-        $this->cardType = $cardType;
-    }
-
-    /**
-     * @return Currency
-     */
-    public function getCurrency(): Currency
-    {
-        return $this->currency;
-    }
-
-    /**
-     * @param Currency $currency
-     */
-    public function setCurrency(Currency $currency): void
-    {
-        $this->currency = $currency;
-    }
-
-    /**
-     * @return ClientLang
-     */
-    public function getClientLang(): ClientLang
-    {
-        return $this->clientLang;
-    }
-
-    /**
-     * @param ClientLang $clientLang
-     */
-    public function setClientLang(ClientLang $clientLang): void
-    {
-        $this->clientLang = $clientLang;
+        return base64_encode(hash_hmac('sha256', sprintf('%s%s', $this->getOrder()->getHash(), $this->getConfig()->getMerchantSalt()), $this->getConfig()->getMerchantKey(), true));
     }
 
     /**
      * @return bool
      */
-    public function isTestMode(): bool
+    public function checkHash(): bool
     {
-        return $this->testMode;
+        $request = Request::createFromGlobals();
+
+        $hash = $request->input('merchant_oid') .
+            $this->getConfig()->getMerchantSalt() .
+            $request->input('status') .
+            $request->input('total_amount');
+
+        $hashToken = base64_encode(hash_hmac('sha256', $hash, $this->getConfig()->getMerchantKey(), true));
+
+        return $hashToken == $request->input('hash');
     }
 
     /**
-     * @param bool $testMode
+     * @return array
      */
-    public function setTestMode(bool $testMode): void
+    public function generateData(): array
     {
-        $this->testMode = $testMode;
-    }
+        $this->getOrder()->setHash($this->generateHash());
 
-    /**
-     * @return bool
-     */
-    public function isNon3d(): bool
-    {
-        return $this->non3d;
-    }
-
-    /**
-     * @param bool $non3d
-     */
-    public function setNon3d(bool $non3d): void
-    {
-        $this->non3d = $non3d;
-    }
-
-    /**
-     * @return bool
-     */
-    public function isNon3dTestFailed(): bool
-    {
-        return $this->non3dTestFailed;
-    }
-
-    /**
-     * @param bool $non3dTestFailed
-     */
-    public function setNon3dTestFailed(bool $non3dTestFailed): void
-    {
-        $this->non3dTestFailed = $non3dTestFailed;
-    }
-
-    /**
-     * @return string
-     */
-    public function getCardOwner(): string
-    {
-        return $this->cardOwner;
-    }
-
-    /**
-     * @param string $cardOwner
-     */
-    public function setCardOwner(string $cardOwner): void
-    {
-        $this->cardOwner = $cardOwner;
-    }
-
-    /**
-     * @return string
-     */
-    public function getCardNumber(): string
-    {
-        return $this->cardNumber;
-    }
-
-    /**
-     * @param string $cardNumber
-     */
-    public function setCardNumber(string $cardNumber): void
-    {
-        $this->cardNumber = $cardNumber;
-    }
-
-    /**
-     * @return string
-     */
-    public function getCardExpireMonth(): string
-    {
-        return $this->cardExpireMonth;
-    }
-
-    /**
-     * @param string $cardExpireMonth
-     */
-    public function setCardExpireMonth(string $cardExpireMonth): void
-    {
-        $this->cardExpireMonth = $cardExpireMonth;
-    }
-
-    /**
-     * @return string
-     */
-    public function getCardExpireYear(): string
-    {
-        return $this->cardExpireYear;
-    }
-
-    /**
-     * @param string $cardExpireYear
-     */
-    public function setCardExpireYear(string $cardExpireYear): void
-    {
-        $this->cardExpireYear = $cardExpireYear;
-    }
-
-    /**
-     * @return string
-     */
-    public function getCardCvv(): string
-    {
-        return $this->cardCvv;
-    }
-
-    /**
-     * @param string $cardCvv
-     */
-    public function setCardCvv(string $cardCvv): void
-    {
-        $this->cardCvv = $cardCvv;
-    }
-
-    /**
-     * @return string
-     */
-    public function getSuccessUrl(): string
-    {
-        return $this->successUrl;
-    }
-
-    /**
-     * @param string $successUrl
-     */
-    public function setSuccessUrl(string $successUrl): void
-    {
-        $this->successUrl = $successUrl;
-    }
-
-    /**
-     * @return string
-     */
-    public function getFailUrl(): string
-    {
-        return $this->failUrl;
-    }
-
-    /**
-     * @param string $failUrl
-     */
-    public function setFailUrl(string $failUrl): void
-    {
-        $this->failUrl = $failUrl;
-    }
-
-    /**
-     * @return string
-     */
-    public function getUserName(): string
-    {
-        return $this->userName;
-    }
-
-    /**
-     * @param string $userName
-     */
-    public function setUserName(string $userName): void
-    {
-        $this->userName = $userName;
-    }
-
-    /**
-     * @return string
-     */
-    public function getUserAddress(): string
-    {
-        return $this->userAddress;
-    }
-
-    /**
-     * @param string $userAddress
-     */
-    public function setUserAddress(string $userAddress): void
-    {
-        $this->userAddress = $userAddress;
-    }
-
-    /**
-     * @return string
-     */
-    public function getUserPhone(): string
-    {
-        return $this->userPhone;
-    }
-
-    /**
-     * @param string $userPhone
-     */
-    public function setUserPhone(string $userPhone): void
-    {
-        $this->userPhone = $userPhone;
-    }
-
-    /**
-     * @return Basket
-     */
-    public function getBasket(): Basket
-    {
-        return $this->basket;
-    }
-
-    /**
-     * @param Basket $basket
-     */
-    public function setBasket(Basket $basket): void
-    {
-        $this->basket = $basket;
-    }
-
-    /**
-     * @return bool
-     */
-    public function isDebugOn(): bool
-    {
-        return $this->debugOn;
-    }
-
-    /**
-     * @param bool $debugOn
-     */
-    public function setDebugOn(bool $debugOn): void
-    {
-        $this->debugOn = $debugOn;
-    }
-
-    /**
-     * @return bool
-     */
-    public function isSyncMode(): bool
-    {
-        return $this->syncMode;
-    }
-
-    /**
-     * @param bool $syncMode
-     */
-    public function setSyncMode(bool $syncMode): void
-    {
-        $this->syncMode = $syncMode;
-    }
-
-    public function getHash(): string
-    {
-        return implode('',[
-            $this->getCredentials()['merchant_id'],
-            $this->getUserIp(),
-            $this->getMerchantOid(),
-            $this->getEmail(),
-            $this->getFormattedPaymentAmount(),
-            $this->getPaymentType()->value,
-            $this->getInstallmentCount(),
-            $this->getCurrency()->value,
-            $this->getOptions()['test_mode'] ? '1' : '0',
-            $this->isNon3d() ? '1' : '0',
-        ]);
-    }
-    private function createPaymentToken()
-    {
-        $hash = $this->getHash();
-        return base64_encode(hash_hmac('sha256', $hash . $this->getCredentials()['merchant_salt'], $this->getCredentials()['merchant_key'], true));
-    }
-
-    public function getBody()
-    {
-        return [
-            'merchant_id' => $this->getCredentials()['merchant_id'],
-            'paytr_token' => $this->createPaymentToken(),
-            'user_ip' => $this->getUserIp(),
-            'merchant_oid' => $this->getMerchantOid(),
-            'email' => $this->getEmail(),
-            'payment_type' => $this->getPaymentType()->value,
-            'payment_amount' => $this->getPaymentAmount(),
-            'installment_count' => $this->getInstallmentCount(),
-            'card_type' => $this->getCardType() ? $this->getCardType()->value : null,
-            'currency' => $this->getCurrency()->value,
-            'client_lang' => $this->getClientLang()->value,
-            'test_mode' => $this->getOptions()['test_mode'] ? '1' : '0',
-            'non_3d' => $this->isNon3d() ? '1' : '0',
-            'non_3d_test_failed' => $this->isNon3dTestFailed() ? '1' : '0',
-            'cc_owner' => $this->getCardOwner(),
-            'card_number' => $this->getCardNumber(),
-            'expiry_month' => $this->getCardExpireMonth(),
-            'expiry_year' => $this->getCardExpireYear(),
-            'cvv' => $this->getCardCvv(),
-            'merchant_ok_url' => $this->getSuccessUrl(),
-            'merchant_fail_url' => $this->getFailUrl(),
-            'user_name' => $this->getUserName(),
-            'user_address' => $this->getUserAddress(),
-            'user_phone' => $this->getUserPhone(),
-            'user_basket' => $this->getBasket()->getFormatted(),
-            'debug_on' => $this->isDebugOn() ? '1' : '0',
-            'sync_mode' => $this->isSyncMode() ? '1' : '0',
+        $data = [
+            'merchant_id' => (string)$this->getConfig()->getMerchantId(),
+            'merchant_oid' => (string)$this->getOrder()->getMerchantOrderId(),
+            'paytr_token' => (string)$this->generateHashToken(),
+            'user_name' => (string)$this->getOrder()->getUserName(),
+            'user_address' => (string)$this->getOrder()->getUserAddress(),
+            'email' => (string)$this->getOrder()->getEmail(),
+            'user_phone' => (string)$this->getOrder()->getUserPhone(),
+            'user_basket' => (string)$this->getOrder()->getBasket()->getFormatted(),
+            'user_ip' => (string)$this->getOrder()->getUserIp(),
+            'currency' => (string)$this->getOption()->getCurrency()->value,
+            'client_lang' => (string)$this->getOption()->getClientLang()->value,
+            'merchant_ok_url' => (string)$this->getOption()->getSuccessUrl(),
+            'merchant_fail_url' => (string)$this->getOption()->getFailUrl(),
+            'debug_on' => (int)$this->getOption()->isDebugOn(),
+            'test_mode' => (int)$this->getOption()->isTestMode(),
+            'timeout_limit' => (int)$this->getOption()->getTimeOutLimit(),
         ];
+
+        if ($this->getOption()->getTransactionType() == TransactionType::DIRECT) {
+            $data['cc_owner'] = (string)$this->getOrder()->getCardOwner();
+            $data['card_number'] = (string)$this->getOrder()->getCardNumber();
+            $data['expiry_month'] = (string)$this->getOrder()->getCardExpireMonth();
+            $data['expiry_year'] = (string)$this->getOrder()->getCardExpireYear();
+            $data['cvv'] = (string)$this->getOrder()->getCardCvv();
+            $data['payment_amount'] = (string)$this->getOrder()->getPaymentAmount();
+            $data['payment_type'] = (string)PaymentType::CARD->value;
+            $data['non_3d'] = (int)$this->getOption()->isNon3d();
+            $data['non3d_test_failed'] = (int)$this->getOption()->isNon3dTestFailed();
+            $data['sync_mode'] = (int)$this->getOption()->isSyncMode();
+            $data['installment_count'] = (int)$this->getOption()->getInstallmentCount();
+
+            if ($this->getOption()->getCardType() != null) {
+                $data['card_type'] = (string)$this->getOption()->getCardType()->value;
+            }
+        }
+
+        if ($this->getOption()->getTransactionType() == TransactionType::IFRAME) {
+            $data['user_basket'] = (string)$this->getOrder()->getBasket()->getFormattedBase64();
+            $data['payment_amount'] = (string)$this->getOrder()->getPaymentAmountFormatted();
+            $data['no_installment'] = (int)$this->getOption()->isNoInstallment();
+            $data['max_installment'] = (int)$this->getOption()->getMaxInstallment();
+        }
+
+        if ($this->getOption()->getTransactionType() == TransactionType::IFRAME_TRANSFER) {
+            $data['payment_type'] = (string)PaymentType::EFT->value;
+            $data['no_installment'] = (int)$this->getOption()->isNoInstallment();
+            $data['max_installment'] = (int)$this->getOption()->getMaxInstallment();
+            $data['payment_amount'] = (string)$this->getOrder()->getPaymentAmountFormatted();
+        }
+
+        return $data;
     }
 
     /**
      * @return PaymentResponse
      * @throws \GuzzleHttp\Exception\GuzzleException
      */
-    public function create(): PaymentResponse
+    public function call(): Payment
     {
-        $response = $this->call('POST', 'odeme/api/get-token', $this->getBody());
-        $content = json_decode((string)$response->getBody(), true);
-        
-        $paymentResponse = new PaymentResponse();
-        if (is_null($content)) {
-            $paymentResponse->setIsHtml(true)
-                            ->setHtml((string)$response->getBody())
-                            ->setIsSuccess(true);
+        $data = $this->generateData();
+
+        if ($this->getOption()->getTransactionType() == TransactionType::DIRECT) {
+            $url = $this->getConfig()->getApiUrl() . '/odeme';
         } else {
-             $paymentResponse->setIsHtml(false)
-                            ->setIsSuccess('success' == $content['status'])
-                            ->setContent($content);
+            $url = $this->getConfig()->getApiUrl() . '/odeme/api/get-token';
         }
-        return $paymentResponse;
+        $request = $this->client->request('POST', $url, [
+            'form_params' => $data,
+            'timeout' => $this->getOption()->getTimeOutLimit(),
+        ]);
+
+        try {
+            $response = $request->getBody()->getContents();
+            $content = json_decode($response, true);
+            if (is_null($content)) {
+                $paymentResponse = (new PaymentResponse())
+                    ->setIsHtml(true)
+                    ->setHtml($response)
+                    ->setIsSuccess(true);
+                $this->setResponse($paymentResponse);
+            } else {
+                $paymentResponse = (new PaymentResponse())
+                    ->setIsHtml(false)
+                    ->setIsSuccess('success' == $content['status'])
+                    ->setContent($content);
+                $this->setResponse($paymentResponse);
+            }
+        } catch (HttpExceptionInterface $e) {
+            throw new ClientException($e->getMessage());
+        }
+
+        return $this;
     }
 }
